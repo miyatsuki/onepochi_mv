@@ -5,32 +5,30 @@ import sys
 
 import cv2
 import numpy as np
-from tqdm import tqdm, trange
+from tqdm import trange
 from PIL import ImageFont, ImageDraw, Image
+
+import ffmpeg
 
 command_file = sys.argv[1]
 setting_file = sys.argv[2]
-output_movie_file = sys.argv[3]
 
 with open(setting_file) as f:
 	setting = json.load(f)
+
+with open(command_file) as f:
+    commands = json.load(f)
 
 background_image = cv2.imread(setting["background_image"])
 (height, width, _) = background_image.shape
 
 fps = 24
-movie_sec = 180
+movie_sec = 110
 frame_num = fps * movie_sec
 
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-
-if os.path.exists(output_movie_file):
-    os.remove(output_movie_file)
-
-out = cv2.VideoWriter(output_movie_file, fourcc, int(fps), (int(width), int(height)))
-
-with open(command_file) as f:
-    commands = json.load(f)
+tempfile = "tmp.mp4"
+out = cv2.VideoWriter(tempfile, fourcc, int(fps), (int(width), int(height)))
 
 frame_command = [{}] * frame_num
 for command in commands:
@@ -43,14 +41,15 @@ for command in commands:
     for frame in range(start_frame, end_frame):
         frame_command[frame] = {"text": command["text"]}
 
-fontpath = setting["header_font"]
+fontpath = setting["font"]
 font = ImageFont.truetype(fontpath, 60)
-bgra = (255, 255, 255, 0)
 position = (30, int(height * 0.91))
 
-fontpath = setting["font"]
+fontpath = setting["header_font"]
 header_font = ImageFont.truetype(fontpath, 48)
 header_position = (30, 30)
+
+bgra = (255, 255, 255, 0)
 
 for i in trange(frame_num):
     frame = np.copy(background_image)
@@ -80,3 +79,13 @@ for i in trange(frame_num):
     out.write(frame)
 
 out.release()
+
+output_movie_file = setting["output_file"]
+if os.path.exists(output_movie_file):
+    os.remove(output_movie_file)
+
+movie_input = ffmpeg.input(tempfile)
+audio_input = ffmpeg.input(setting["audio_file"])
+output = ffmpeg.output(movie_input, audio_input, setting["output_file"])
+print(ffmpeg.compile(output))
+ffmpeg.run(output)
