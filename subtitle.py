@@ -24,6 +24,7 @@ materials_dir = title_dir / "materials"
 command_file = materials_dir / "commands.json"
 setting_file = materials_dir / "settings.json"
 
+
 def resolve_path(path_string):
     p = pathlib.Path(path_string)
     if p.is_absolute():
@@ -31,8 +32,9 @@ def resolve_path(path_string):
     else:
         return materials_dir / p
 
+
 with open(setting_file) as f:
-	setting = json.load(f)
+    setting = json.load(f)
 
 setting["background_image"] = resolve_path(setting["background_image"])
 setting["header_font"] = resolve_path(setting["header_font"])
@@ -92,9 +94,7 @@ with tempfile.TemporaryDirectory() as tmp_dir:
         draw.text(position, text, font=font, fill=bgra)
 
         # ヘッダー
-        draw.text(
-            header_position, setting["header"], font=header_font, fill=bgra
-        )
+        draw.text(header_position, setting["header"], font=header_font, fill=bgra)
         frame = np.array(img_pil)
 
         out.write(frame)
@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     print(ffmpeg.compile(output))
     ffmpeg.run(output)
 
-    yyyymmddhhmmss = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    yyyymmddhhmmss = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     result_dir = title_dir / f"archive/{yyyymmddhhmmss}/"
     shutil.copytree(tmp_dir_path, result_dir)
 
