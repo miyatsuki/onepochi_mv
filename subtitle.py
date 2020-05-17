@@ -1,22 +1,18 @@
 import datetime
-import os
 import json
-import sys
+import math
+import os
 import pathlib
-import tempfile
-import datetime
 import shutil
+import sys
+import tempfile
 
 import cv2
-import numpy as np
-from tqdm import trange
-from PIL import ImageFont, ImageDraw, Image
-
 import ffmpeg
-
-fps = 24
-movie_sec = 110
-frame_num = fps * movie_sec
+import librosa
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+from tqdm import trange
 
 title_dir = pathlib.Path(sys.argv[1])
 src_dir = pathlib.Path(__file__).parent.resolve()
@@ -40,6 +36,11 @@ setting["background_image"] = resolve_path(setting["background_image"])
 setting["header_font"] = resolve_path(setting["header_font"])
 setting["font"] = resolve_path(setting["font"])
 setting["audio_file"] = resolve_path(setting["audio_file"])
+
+fps = setting["fps"]
+y, sr = librosa.load(str(setting["audio_file"]))
+movie_sec = math.ceil(librosa.get_duration(y, sr))
+frame_num = fps * movie_sec
 
 with open(command_file) as f:
     commands = json.load(f)
