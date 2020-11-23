@@ -6,6 +6,7 @@ import shutil
 import sys
 import tempfile
 import copy
+from itertools import product
 
 import cv2
 import ffmpeg
@@ -81,6 +82,12 @@ for command in commands:
                 color_coef = (target_color - base_color) / (end_frame - start_frame)
                 to_color = color_coef * (frame - start_frame) + base_color
                 frame_command["color-change"]["to-color"][rgb] = to_color
+        elif "fadeout" in command:
+            frame_command["alpha-blend"] = {}
+            frame_command["alpha-blend"]["to-color"] = command["fadeout"]
+            alpha_coef = -1 / (end_frame - start_frame)
+            elapsed_frame = frame - start_frame
+            frame_command["alpha-blend"]["alpha"] = 1 + alpha_coef * elapsed_frame
         else:
             raise ValueError
 
@@ -131,6 +138,12 @@ with tempfile.TemporaryDirectory() as tmp_dir:
                 for x in range(lu[0], rd[0] + 1):
                     if (frame[y, x] == base_rgb).all():  # 指定の色と一致してたら色を差し替える
                         frame[y, x] = to_bgr  # rgbじゃなくてbgrで格納されてるので
+        if "alpha-blend" in command:
+            rd = [frame.shape[0], frame.shape[1]]  # 右下(rangeなので-1しなくていい)
+            alpha = command["alpha-blend"]["alpha"]
+            to_bgr = np.flip(np.array(command["alpha-blend"]["to-color"]))
+            frame = frame * alpha + to_bgr * (1 - alpha)
+            frame = frame.astype("uint8")
 
         out.write(frame)
 
