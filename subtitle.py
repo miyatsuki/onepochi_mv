@@ -1,18 +1,18 @@
 import datetime
 import json
 import math
-import os
 import pathlib
 import shutil
 import sys
 import tempfile
+import copy
 
 import cv2
 import ffmpeg
 import librosa
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from tqdm import trange
+from tqdm import tqdm
 
 title_dir = pathlib.Path(sys.argv[1])
 src_dir = pathlib.Path(__file__).parent.resolve()
@@ -50,7 +50,9 @@ background_image = cv2.imread(background_path)
 (height, width, _) = background_image.shape
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
-frame_command = [{}] * frame_num
+# deepcopyしておかないとリスト内のdictが全部同じIDになって死ぬ
+frame_commands = [copy.deepcopy({}) for _ in range(frame_num)]
+
 for command in commands:
     start_sec = command["time"][0]
     end_sec = command["time"][1]
@@ -59,7 +61,28 @@ for command in commands:
     end_frame = int(end_sec * fps)
 
     for frame in range(start_frame, end_frame):
-        frame_command[frame] = {"text": command["text"]}
+        frame_command = frame_commands[frame]
+        if "text" in command:
+            frame_command["text"] = command["text"]
+        elif "color-transition" in command:
+            # 連続変化はフレーム単位では単純な差し替えなので差し替えっぽい命令に書き換える
+            # color-changeコマンドは今のところ使ってないけど。
+            frame_command["color-change"] = {}
+            frame_command["color-change"]["range"] = command["color-transition"][
+                "range"
+            ]
+            frame_command["color-change"]["from-color"] = command["color-transition"][
+                "from-color"
+            ]
+            frame_command["color-change"]["to-color"] = [0, 0, 0]
+            for rgb in range(3):  # rgb
+                base_color = command["color-transition"]["from-color"][rgb]
+                target_color = command["color-transition"]["to-color"][rgb]
+                color_coef = (target_color - base_color) / (end_frame - start_frame)
+                to_color = color_coef * (frame - start_frame) + base_color
+                frame_command["color-change"]["to-color"][rgb] = to_color
+        else:
+            raise ValueError
 
 fontpath = str(setting["font"])
 font = ImageFont.truetype(fontpath, 60)
@@ -75,7 +98,8 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     tempfile = tmp_dir_path / "tmp.mp4"
     out = cv2.VideoWriter(str(tempfile), fourcc, int(fps), (int(width), int(height)))
 
-    for i in trange(frame_num):
+    is_first = True
+    for command in tqdm(frame_commands):
         frame = np.copy(background_image)
 
         cv2.rectangle(
@@ -85,8 +109,8 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             frame, (0, int(height * 0.9) - 10), (width, height), (0, 0, 0), thickness=-1
         )
 
-        if "text" in frame_command[i]:
-            text = frame_command[i]["text"]
+        if "text" in command:
+            text = command["text"]
         else:
             text = ""
 
@@ -98,7 +122,22 @@ with tempfile.TemporaryDirectory() as tmp_dir:
         draw.text(header_position, setting["header"], font=header_font, fill=bgra)
         frame = np.array(img_pil)
 
+        if "color-change" in command:
+            lu = command["color-change"]["range"][0]  # 左上
+            rd = command["color-change"]["range"][1]  # 右下
+            base_rgb = np.array(command["color-change"]["from-color"])
+            to_bgr = np.flip(np.array(command["color-change"]["to-color"]))
+            for y in range(lu[1], rd[1] + 1):
+                for x in range(lu[0], rd[0] + 1):
+                    if (frame[y, x] == base_rgb).all():  # 指定の色と一致してたら色を差し替える
+                        frame[y, x] = to_bgr  # rgbじゃなくてbgrで格納されてるので
+
         out.write(frame)
+
+        # サムネ用画像
+        if is_first:
+            cv2.imwrite(str(tmp_dir_path / "Thumbnail.jpg"), frame)
+            is_first = False
 
     out.release()
 
