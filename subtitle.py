@@ -153,4 +153,3 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     shutil.copytree(tmp_dir_path, result_dir)
 
 shutil.copytree(materials_dir, result_dir / "materials")
-shutil.copytree(src_dir, result_dir / "src")
