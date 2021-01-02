@@ -1,11 +1,11 @@
+import copy
 import datetime
 import json
-import math
 import pathlib
 import shutil
 import sys
 import tempfile
-import copy
+from typing import NamedTuple, Tuple
 
 import audioread
 import cv2
@@ -21,6 +21,12 @@ command_file = materials_dir / "commands.json"
 setting_file = materials_dir / "settings.json"
 
 
+class HeaderSetting(NamedTuple):
+    text: str
+    font: ImageFont.ImageFont
+    position: Tuple[int, int]
+
+
 def resolve_path(path_string):
     p = pathlib.Path(path_string)
     if p.is_absolute():
@@ -32,8 +38,6 @@ def resolve_path(path_string):
 with open(setting_file) as f:
     setting = json.load(f)
 
-setting["background_image"] = resolve_path(setting["background_image"])
-setting["header_font"] = resolve_path(setting["header_font"])
 setting["font"] = resolve_path(setting["font"])
 setting["audio_file"] = resolve_path(setting["audio_file"])
 
@@ -46,9 +50,16 @@ frame_num = int(fps * movie_sec)
 with open(command_file) as f:
     commands = json.load(f)
 
-background_path = str(setting["background_image"])
-background_image = cv2.imread(background_path)
-(height, width, _) = background_image.shape
+background_image = None
+if "background_image" in setting:
+    setting["background_image"] = resolve_path(setting["background_image"])
+    background_path = str(setting["background_image"])
+    background_image = cv2.imread(background_path)
+    (height, width, _) = background_image.shape
+else:
+    width = setting["width"]
+    height = setting["height"]
+
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
 # deepcopyしておかないとリスト内のdictが全部同じIDになって死ぬ
@@ -95,11 +106,15 @@ fontpath = str(setting["font"])
 font = ImageFont.truetype(fontpath, 60)
 position = (30, int(height * 0.91))
 
-fontpath = str(setting["header_font"])
-header_font = ImageFont.truetype(fontpath, 48)
-header_position = (30, 30)
-bgra = (255, 255, 255, 0)
+header_setting = None
+if "header" in setting:
+    setting["header_font"] = resolve_path(setting["header_font"])
+    fontpath = str(setting["header_font"])
+    header_font = ImageFont.truetype(fontpath, 48)
+    header_position = (30, 30)
+    header_setting = HeaderSetting(setting["header"], header_font, header_position)
 
+bgra = (255, 255, 255, 0)
 with tempfile.TemporaryDirectory() as tmp_dir:
     tmp_dir_path = pathlib.Path(tmp_dir)
     tempfile = tmp_dir_path / "tmp.mp4"
@@ -107,11 +122,17 @@ with tempfile.TemporaryDirectory() as tmp_dir:
 
     is_first = True
     for command in tqdm(frame_commands):
-        frame = np.copy(background_image)
 
-        cv2.rectangle(
-            frame, (0, 0), (width, int(height * 0.075) + 10), (0, 0, 0), thickness=-1
-        )
+        if background_image is not None:
+            frame = np.copy(background_image)
+        else:
+            frame = np.ones((1080, 1920, 3), dtype="uint8") * 255
+
+        # サムネ用画像
+        if is_first:
+            cv2.imwrite(str(tmp_dir_path / "Thumbnail.jpg"), frame)
+            is_first = False
+
         cv2.rectangle(
             frame, (0, int(height * 0.9) - 10), (width, height), (0, 0, 0), thickness=-1
         )
@@ -126,7 +147,23 @@ with tempfile.TemporaryDirectory() as tmp_dir:
         draw.text(position, text, font=font, fill=bgra)
 
         # ヘッダー
-        draw.text(header_position, setting["header"], font=header_font, fill=bgra)
+        if header_setting is not None:
+            cv2.rectangle(
+                frame,
+                (0, 0),
+                (width, int(height * 0.075) + 10),
+                (0, 0, 0),
+                thickness=-1,
+            )
+
+            # color=bgra
+            draw.text(
+                header_setting.position,
+                header_setting.text,
+                font=header_setting.font,
+                fill=(255, 255, 255, 0),
+            )
+
         frame = np.array(img_pil)
 
         if "color-change" in command:
@@ -146,11 +183,6 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             frame = frame.astype("uint8")
 
         out.write(frame)
-
-        # サムネ用画像
-        if is_first:
-            cv2.imwrite(str(tmp_dir_path / "Thumbnail.jpg"), frame)
-            is_first = False
 
     out.release()
 
