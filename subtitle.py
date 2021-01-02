@@ -6,11 +6,10 @@ import shutil
 import sys
 import tempfile
 import copy
-from itertools import product
 
+import audioread
 import cv2
 import ffmpeg
-import librosa
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
@@ -39,9 +38,10 @@ setting["font"] = resolve_path(setting["font"])
 setting["audio_file"] = resolve_path(setting["audio_file"])
 
 fps = setting["fps"]
-y, sr = librosa.load(str(setting["audio_file"]))
-movie_sec = math.ceil(librosa.get_duration(y, sr))
-frame_num = fps * movie_sec
+with audioread.audio_open(setting["audio_file"]) as f:
+    movie_sec = f.duration
+
+frame_num = int(fps * movie_sec)
 
 with open(command_file) as f:
     commands = json.load(f)
