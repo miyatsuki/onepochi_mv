@@ -21,7 +21,7 @@ command_file = materials_dir / "commands.json"
 setting_file = materials_dir / "settings.json"
 
 
-class HeaderSetting(NamedTuple):
+class Header(NamedTuple):
     text: str
     font: ImageFont.ImageFont
     position: Tuple[int, int]
@@ -33,6 +33,12 @@ def resolve_path(path_string):
         return p.resolve()
     else:
         return materials_dir / p
+
+
+def load_image(path_string: str) -> np.array:
+    path = str(resolve_path(path_string))
+    image = cv2.imread(path)
+    return image
 
 
 with open(setting_file) as f:
@@ -52,9 +58,7 @@ with open(command_file) as f:
 
 background_image = None
 if "background_image" in setting:
-    setting["background_image"] = resolve_path(setting["background_image"])
-    background_path = str(setting["background_image"])
-    background_image = cv2.imread(background_path)
+    background_image = load_image(setting["background_image"])
     (height, width, _) = background_image.shape
 else:
     width = setting["width"]
@@ -106,13 +110,13 @@ fontpath = str(setting["font"])
 font = ImageFont.truetype(fontpath, 60)
 position = (30, int(height * 0.91))
 
-header_setting = None
+header = None
 if "header" in setting:
     setting["header_font"] = resolve_path(setting["header_font"])
     fontpath = str(setting["header_font"])
     header_font = ImageFont.truetype(fontpath, 48)
     header_position = (30, 30)
-    header_setting = HeaderSetting(setting["header"], header_font, header_position)
+    header_setting = Header(setting["header"], header_font, header_position)
 
 bgra = (255, 255, 255, 0)
 with tempfile.TemporaryDirectory() as tmp_dir:
@@ -125,7 +129,10 @@ with tempfile.TemporaryDirectory() as tmp_dir:
 
         if background_image is not None:
             frame = np.copy(background_image)
+        elif "background_image" in command:
+            frame = np.copy(load_image(command["background_image"]))
         else:
+            # 真っ白で初期化
             frame = np.ones((1080, 1920, 3), dtype="uint8") * 255
 
         # サムネ用画像
@@ -137,17 +144,14 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             frame, (0, int(height * 0.9) - 10), (width, height), (0, 0, 0), thickness=-1
         )
 
-        if "text" in command:
-            text = command["text"]
-        else:
-            text = ""
-
         img_pil = Image.fromarray(frame)
         draw = ImageDraw.Draw(img_pil)
+        text = command["text"] if "text" in command else ""
         draw.text(position, text, font=font, fill=bgra)
+        frame = np.array(img_pil)
 
         # ヘッダー
-        if header_setting is not None:
+        if header is not None:
             cv2.rectangle(
                 frame,
                 (0, 0),
@@ -158,13 +162,11 @@ with tempfile.TemporaryDirectory() as tmp_dir:
 
             # color=bgra
             draw.text(
-                header_setting.position,
-                header_setting.text,
-                font=header_setting.font,
+                header.position,
+                header.text,
+                font=header.font,
                 fill=(255, 255, 255, 0),
             )
-
-        frame = np.array(img_pil)
 
         if "color-change" in command:
             lu = command["color-change"]["range"][0]  # 左上
