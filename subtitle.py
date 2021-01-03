@@ -80,7 +80,8 @@ for command in commands:
         frame_command = frame_commands[frame]
         if "text" in command:
             frame_command["text"] = command["text"]
-        elif "color-transition" in command:
+
+        if "color-transition" in command:
             # 連続変化はフレーム単位では単純な差し替えなので差し替えっぽい命令に書き換える
             # color-changeコマンドは今のところ使ってないけど。
             frame_command["color-change"] = {}
@@ -97,14 +98,16 @@ for command in commands:
                 color_coef = (target_color - base_color) / (end_frame - start_frame)
                 to_color = color_coef * (frame - start_frame) + base_color
                 frame_command["color-change"]["to-color"][rgb] = to_color
-        elif "fadeout" in command:
+
+        if "fadeout" in command:
             frame_command["alpha-blend"] = {}
             frame_command["alpha-blend"]["to-color"] = command["fadeout"]
             alpha_coef = -1 / (end_frame - start_frame)
             elapsed_frame = frame - start_frame
             frame_command["alpha-blend"]["alpha"] = 1 + alpha_coef * elapsed_frame
-        else:
-            raise ValueError
+
+        if "background-image" in command:
+            frame_command["background_image"] = command["background-image"]
 
 fontpath = str(setting["font"])
 font = ImageFont.truetype(fontpath, 60)
