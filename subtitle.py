@@ -5,7 +5,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 import audioread
 import cv2
@@ -27,6 +27,24 @@ class Header(NamedTuple):
     position: Tuple[int, int]
 
 
+class Subtitle(NamedTuple):
+    font: ImageFont.ImageFont
+    position: Tuple[int, int]
+
+
+class Setting(NamedTuple):
+    header: Optional[Header]
+    subtitle: Subtitle
+    fps: int
+    frame_num: int
+    duration: float
+    background_image: Optional[np.array]
+    width: int
+    height: int
+    output_file: pathlib.Path
+    audio_file: pathlib.Path
+
+
 def resolve_path(path_string):
     p = pathlib.Path(path_string)
     if p.is_absolute():
@@ -42,43 +60,73 @@ def load_image(path_string: str) -> np.array:
     return image
 
 
-with open(setting_file) as f:
-    setting = json.load(f)
+def load_setting(setting_file: str) -> Setting:
+    with open(setting_file) as f:
+        setting = json.load(f)
 
-setting["font"] = resolve_path(setting["font"])
-setting["audio_file"] = resolve_path(setting["audio_file"])
+    setting["font"] = resolve_path(setting["font"])
+    setting["audio_file"] = resolve_path(setting["audio_file"])
+    fps = setting["fps"]
+    with audioread.audio_open(setting["audio_file"]) as f:
+        duration = f.duration
 
-fps = setting["fps"]
-with audioread.audio_open(setting["audio_file"]) as f:
-    movie_sec = f.duration
+    frame_num = int(fps * duration)
 
-frame_num = int(fps * movie_sec)
+    background_image = None
+    if "background_image" in setting:
+        background_image = load_image(setting["background_image"])
+        (height, width, _) = background_image.shape
+    else:
+        width = setting["width"]
+        height = setting["height"]
 
+    # subtitle_setting
+    fontpath = str(setting["font"])
+    font = ImageFont.truetype(fontpath, 60)
+    position = (30, int(height * 0.91))
+    subtitle = Subtitle(font, position)
+
+    # header_setting
+    header = None
+    if "header" in setting:
+        setting["header_font"] = resolve_path(setting["header_font"])
+        fontpath = str(setting["header_font"])
+        header_font = ImageFont.truetype(fontpath, 48)
+        header_position = (30, 30)
+        header = Header(setting["header"], header_font, header_position)
+
+    return Setting(
+        header=header,
+        subtitle=subtitle,
+        fps=fps,
+        frame_num=frame_num,
+        duration=duration,
+        background_image=background_image,
+        width=width,
+        height=height,
+        output_file=setting["output_file"],
+        audio_file=setting["audio_file"],
+    )
+
+
+setting = load_setting(setting_file)
+
+fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 with open(command_file) as f:
     commands = json.load(f)
 
-background_image = None
-if "background_image" in setting:
-    background_image = load_image(setting["background_image"])
-    (height, width, _) = background_image.shape
-else:
-    width = setting["width"]
-    height = setting["height"]
-
-fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-
 # deepcopyしておかないとリスト内のdictが全部同じIDになって死ぬ
-frame_commands = [copy.deepcopy({}) for _ in range(frame_num)]
+frame_commands = [copy.deepcopy({}) for _ in range(setting.frame_num)]
 
 for command in commands:
     start_sec = command["time"][0]
     if command["time"][1] != "end":
         end_sec = command["time"][1]
     else:
-        end_sec = movie_sec
+        end_sec = setting.duration
 
-    start_frame = int(start_sec * fps)
-    end_frame = int(end_sec * fps)
+    start_frame = int(start_sec * setting.fps)
+    end_frame = int(end_sec * setting.fps)
 
     for frame in range(start_frame, end_frame):
         frame_command = frame_commands[frame]
@@ -113,31 +161,24 @@ for command in commands:
         if "background-image" in command:
             frame_command["background_image"] = command["background-image"]
 
-fontpath = str(setting["font"])
-font = ImageFont.truetype(fontpath, 60)
-position = (30, int(height * 0.91))
-
-header = None
-if "header" in setting:
-    setting["header_font"] = resolve_path(setting["header_font"])
-    fontpath = str(setting["header_font"])
-    header_font = ImageFont.truetype(fontpath, 48)
-    header_position = (30, 30)
-    header_setting = Header(setting["header"], header_font, header_position)
-
 bgra = (255, 255, 255, 0)
 with tempfile.TemporaryDirectory() as tmp_dir:
     tmp_dir_path = pathlib.Path(tmp_dir)
     tempfile = tmp_dir_path / "tmp.mp4"
-    out = cv2.VideoWriter(str(tempfile), fourcc, int(fps), (int(width), int(height)))
+    out = cv2.VideoWriter(
+        str(tempfile),
+        fourcc,
+        int(setting.fps),
+        (int(setting.width), int(setting.height)),
+    )
 
     is_first = True
     for command in tqdm(frame_commands):
 
         if "background_image" in command:
             frame = np.copy(load_image(command["background_image"]))
-        elif background_image is not None:
-            frame = np.copy(background_image)
+        elif setting.background_image is not None:
+            frame = np.copy(setting.background_image)
         else:
             # 真っ白で初期化
             frame = np.ones((1080, 1920, 3), dtype="uint8") * 255
@@ -148,30 +189,36 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             is_first = False
 
         cv2.rectangle(
-            frame, (0, int(height * 0.9) - 10), (width, height), (0, 0, 0), thickness=-1
+            frame,
+            (0, int(setting.height * 0.9) - 10),
+            (setting.width, setting.height),
+            (0, 0, 0),
+            thickness=-1,
         )
 
         img_pil = Image.fromarray(frame)
         draw = ImageDraw.Draw(img_pil)
         text = command["text"] if "text" in command else ""
-        draw.text(position, text, font=font, fill=bgra)
+        draw.text(
+            setting.subtitle.position, text, font=setting.subtitle.font, fill=bgra
+        )
         frame = np.array(img_pil)
 
         # ヘッダー
-        if header is not None:
+        if setting.header is not None:
             cv2.rectangle(
                 frame,
                 (0, 0),
-                (width, int(height * 0.075) + 10),
+                (setting.width, int(setting.height * 0.075) + 10),
                 (0, 0, 0),
                 thickness=-1,
             )
 
             # color=bgra
             draw.text(
-                header.position,
-                header.text,
-                font=header.font,
+                setting.header.position,
+                setting.header.text,
+                font=setting.header.font,
                 fill=(255, 255, 255, 0),
             )
 
@@ -195,9 +242,9 @@ with tempfile.TemporaryDirectory() as tmp_dir:
 
     out.release()
 
-    output_movie_file = str(tmp_dir_path / setting["output_file"])
+    output_movie_file = str(tmp_dir_path / setting.output_file)
     movie_input = ffmpeg.input(tempfile)
-    audio_input = ffmpeg.input(setting["audio_file"])
+    audio_input = ffmpeg.input(setting.audio_file)
     output = ffmpeg.output(movie_input, audio_input, output_movie_file)
     print(ffmpeg.compile(output))
     ffmpeg.run(output)
