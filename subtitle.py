@@ -72,7 +72,10 @@ frame_commands = [copy.deepcopy({}) for _ in range(frame_num)]
 
 for command in commands:
     start_sec = command["time"][0]
-    end_sec = command["time"][1]
+    if command["time"][1] != "end":
+        end_sec = command["time"][1]
+    else:
+        end_sec = movie_sec
 
     start_frame = int(start_sec * fps)
     end_frame = int(end_sec * fps)
