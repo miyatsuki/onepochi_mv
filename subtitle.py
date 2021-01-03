@@ -36,6 +36,7 @@ def resolve_path(path_string):
 
 
 def load_image(path_string: str) -> np.array:
+    assert resolve_path(path_string).exists(), f"{path_string}は存在しません"
     path = str(resolve_path(path_string))
     image = cv2.imread(path)
     return image
