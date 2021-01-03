@@ -134,10 +134,10 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     is_first = True
     for command in tqdm(frame_commands):
 
-        if background_image is not None:
-            frame = np.copy(background_image)
-        elif "background_image" in command:
+        if "background_image" in command:
             frame = np.copy(load_image(command["background_image"]))
+        elif background_image is not None:
+            frame = np.copy(background_image)
         else:
             # 真っ白で初期化
             frame = np.ones((1080, 1920, 3), dtype="uint8") * 255
