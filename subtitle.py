@@ -109,6 +109,20 @@ def load_setting(setting_file: str) -> Setting:
     )
 
 
+def draw_text(
+    frame: np.array,
+    position: Tuple[int, int],
+    text: str,
+    font: ImageFont.ImageFont,
+    bgra: Tuple[int, int, int, int],
+) -> np.array:
+    img_pil = Image.fromarray(frame)
+    draw = ImageDraw.Draw(img_pil)
+    draw.text(position, text, font=font, fill=bgra)
+    frame = np.array(img_pil)
+    return frame
+
+
 setting = load_setting(setting_file)
 
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -196,13 +210,14 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             thickness=-1,
         )
 
-        img_pil = Image.fromarray(frame)
-        draw = ImageDraw.Draw(img_pil)
         text = command["text"] if "text" in command else ""
-        draw.text(
-            setting.subtitle.position, text, font=setting.subtitle.font, fill=bgra
+        frame = draw_text(
+            frame=frame,
+            position=setting.subtitle.position,
+            text=text,
+            font=setting.subtitle.font,
+            bgra=bgra,
         )
-        frame = np.array(img_pil)
 
         # ヘッダー
         if setting.header is not None:
@@ -214,12 +229,12 @@ with tempfile.TemporaryDirectory() as tmp_dir:
                 thickness=-1,
             )
 
-            # color=bgra
-            draw.text(
-                setting.header.position,
-                setting.header.text,
+            frame = draw_text(
+                frame=frame,
+                position=setting.header.position,
+                text=setting.header.text,
                 font=setting.header.font,
-                fill=(255, 255, 255, 0),
+                bgra=bgra,
             )
 
         if "color-change" in command:
