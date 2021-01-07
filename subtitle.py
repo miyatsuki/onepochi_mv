@@ -67,7 +67,7 @@ def load_setting(setting_file: str) -> Setting:
     setting["font"] = resolve_path(setting["font"])
     setting["audio_file"] = resolve_path(setting["audio_file"])
     fps = setting["fps"]
-    with audioread.audio_open(setting["audio_file"]) as f:
+    with audioread.audio_open(str(setting["audio_file"])) as f:
         duration = f.duration
 
     frame_num = int(fps * duration)
