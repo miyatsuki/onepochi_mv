@@ -175,6 +175,10 @@ for command in commands:
         if "background-image" in command:
             frame_command["background_image"] = command["background-image"]
 
+        if "no-header" in command:
+            frame_command["no_header"] = True
+
+
 bgra = (255, 255, 255, 0)
 with tempfile.TemporaryDirectory() as tmp_dir:
     tmp_dir_path = pathlib.Path(tmp_dir)
@@ -221,21 +225,22 @@ with tempfile.TemporaryDirectory() as tmp_dir:
 
         # ヘッダー
         if setting.header is not None:
-            cv2.rectangle(
-                frame,
-                (0, 0),
-                (setting.width, int(setting.height * 0.075) + 10),
-                (0, 0, 0),
-                thickness=-1,
-            )
+            if "no_header" not in command or not command["no_header"]:
+                cv2.rectangle(
+                    frame,
+                    (0, 0),
+                    (setting.width, int(setting.height * 0.075) + 10),
+                    (0, 0, 0),
+                    thickness=-1,
+                )
 
-            frame = draw_text(
-                frame=frame,
-                position=setting.header.position,
-                text=setting.header.text,
-                font=setting.header.font,
-                bgra=bgra,
-            )
+                frame = draw_text(
+                    frame=frame,
+                    position=setting.header.position,
+                    text=setting.header.text,
+                    font=setting.header.font,
+                    bgra=bgra,
+                )
 
         if "color-change" in command:
             lu = command["color-change"]["range"][0]  # 左上
