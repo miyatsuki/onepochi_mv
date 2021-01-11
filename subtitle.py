@@ -43,6 +43,7 @@ class Setting(NamedTuple):
     height: int
     output_file: pathlib.Path
     audio_file: pathlib.Path
+    sec_base: float
 
 
 def resolve_path(path_string):
@@ -95,6 +96,11 @@ def load_setting(setting_file: str) -> Setting:
         header_position = (30, 30)
         header = Header(setting["header"], header_font, header_position)
 
+    if "sec_base" in setting:
+        sec_base = setting["sec_base"]
+    else:
+        sec_base = 1
+
     return Setting(
         header=header,
         subtitle=subtitle,
@@ -106,6 +112,7 @@ def load_setting(setting_file: str) -> Setting:
         height=height,
         output_file=setting["output_file"],
         audio_file=setting["audio_file"],
+        sec_base=sec_base,
     )
 
 
@@ -133,9 +140,9 @@ with open(command_file) as f:
 frame_commands = [copy.deepcopy({}) for _ in range(setting.frame_num)]
 
 for command in commands:
-    start_sec = command["time"][0]
+    start_sec = command["time"][0] * setting.sec_base
     if command["time"][1] != "end":
-        end_sec = command["time"][1]
+        end_sec = command["time"][1] * setting.sec_base
     else:
         end_sec = setting.duration
 
