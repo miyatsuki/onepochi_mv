@@ -136,6 +136,9 @@ def draw_text(
     return frame
 
 
+image_cache: Dict[str, Any] = {}
+
+
 def parse_command(command: Dict) -> Dict:
     ans = {}
     if "text" in command:
@@ -163,6 +166,12 @@ def parse_command(command: Dict) -> Dict:
         ans["alpha-blend"]["alpha"] = 1 + alpha_coef * elapsed_frame
 
     if "background-image" in command:
+        image_file_name = command["background-image"]
+        if image_file_name not in image_cache:
+            image_cache[image_file_name] = np.copy(
+                load_image(command["background-image"])
+            )
+
         ans["background_image"] = command["background-image"]
 
     if "no-header" in command:
@@ -197,7 +206,6 @@ for command in commands:
         frame_commands[frame] |= parse_command(command)
 
 bgra = (255, 255, 255, 0)
-image_cache: Dict[str, Any] = {}
 with tempfile.TemporaryDirectory() as tmp_dir:
     tmp_dir_path = pathlib.Path(tmp_dir)
     tempfile = tmp_dir_path / "tmp.mp4"
@@ -212,11 +220,6 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     for command in tqdm(frame_commands):
         if "background_image" in command:
             image_file_name = command["background_image"]
-            if image_file_name not in image_cache:
-                image_cache[image_file_name] = np.copy(
-                    load_image(command["background_image"])
-                )
-
             frame = np.copy(image_cache[image_file_name])
         else:
             # 真っ白で初期化
