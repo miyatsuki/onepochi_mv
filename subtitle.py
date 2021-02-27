@@ -5,7 +5,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
-from typing import NamedTuple, Optional, Tuple
+from typing import Dict, NamedTuple, Optional, Tuple
 
 import audioread
 import cv2
@@ -38,12 +38,13 @@ class Setting(NamedTuple):
     fps: int
     frame_num: int
     duration: float
-    background_image: Optional[np.array]
+    default_command: Dict
     width: int
     height: int
     output_file: pathlib.Path
     audio_file: pathlib.Path
     sec_base: float
+    sec_offset: int
 
 
 def resolve_path(path_string):
@@ -73,13 +74,12 @@ def load_setting(setting_file: str) -> Setting:
 
     frame_num = int(fps * duration)
 
-    background_image = None
-    if "background_image" in setting:
-        background_image = load_image(setting["background_image"])
-        (height, width, _) = background_image.shape
-    else:
-        width = setting["width"]
-        height = setting["height"]
+    default_command = {}
+    if "default_command" in setting:
+        default_command = setting["default_command"]
+
+    width = setting["width"]
+    height = setting["height"]
 
     # subtitle_setting
     fontpath = str(setting["font"])
@@ -101,18 +101,24 @@ def load_setting(setting_file: str) -> Setting:
     else:
         sec_base = 1
 
+    if "sec_offset" in setting:
+        sec_offset = setting["sec_offset"]
+    else:
+        sec_offset = 0
+
     return Setting(
         header=header,
         subtitle=subtitle,
         fps=fps,
         frame_num=frame_num,
         duration=duration,
-        background_image=background_image,
+        default_command=default_command,
         width=width,
         height=height,
         output_file=setting["output_file"],
         audio_file=setting["audio_file"],
         sec_base=sec_base,
+        sec_offset=sec_offset,
     )
 
 
@@ -130,6 +136,41 @@ def draw_text(
     return frame
 
 
+def parse_command(command: Dict) -> Dict:
+    ans = {}
+    if "text" in command:
+        ans["text"] = command["text"]
+
+    if "color-transition" in command:
+        # 連続変化はフレーム単位では単純な差し替えなので差し替えっぽい命令に書き換える
+        # color-changeコマンドは今のところ使ってないけど。
+        ans["color-change"] = {}
+        ans["color-change"]["range"] = command["color-transition"]["range"]
+        ans["color-change"]["from-color"] = command["color-transition"]["from-color"]
+        ans["color-change"]["to-color"] = [0, 0, 0]
+        for rgb in range(3):  # rgb
+            base_color = command["color-transition"]["from-color"][rgb]
+            target_color = command["color-transition"]["to-color"][rgb]
+            color_coef = (target_color - base_color) / (end_frame - start_frame)
+            to_color = color_coef * (frame - start_frame) + base_color
+            ans["color-change"]["to-color"][rgb] = to_color
+
+    if "fadeout" in command:
+        ans["alpha-blend"] = {}
+        ans["alpha-blend"]["to-color"] = command["fadeout"]
+        alpha_coef = -1 / (end_frame - start_frame)
+        elapsed_frame = frame - start_frame
+        ans["alpha-blend"]["alpha"] = 1 + alpha_coef * elapsed_frame
+
+    if "background-image" in command:
+        ans["background_image"] = command["background-image"]
+
+    if "no-header" in command:
+        ans["no_header"] = True
+
+    return ans
+
+
 setting = load_setting(setting_file)
 
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -137,12 +178,15 @@ with open(command_file) as f:
     commands = json.load(f)
 
 # deepcopyしておかないとリスト内のdictが全部同じIDになって死ぬ
-frame_commands = [copy.deepcopy({}) for _ in range(setting.frame_num)]
+frame_commands = [
+    copy.deepcopy(parse_command(setting.default_command))
+    for _ in range(setting.frame_num)
+]
 
 for command in commands:
-    start_sec = command["time"][0] * setting.sec_base
+    start_sec = (command["time"][0] - setting.sec_offset) * setting.sec_base
     if command["time"][1] != "end":
-        end_sec = command["time"][1] * setting.sec_base
+        end_sec = (command["time"][1] - setting.sec_offset) * setting.sec_base
     else:
         end_sec = setting.duration
 
@@ -150,41 +194,7 @@ for command in commands:
     end_frame = int(end_sec * setting.fps)
 
     for frame in range(start_frame, end_frame):
-        frame_command = frame_commands[frame]
-        if "text" in command:
-            frame_command["text"] = command["text"]
-
-        if "color-transition" in command:
-            # 連続変化はフレーム単位では単純な差し替えなので差し替えっぽい命令に書き換える
-            # color-changeコマンドは今のところ使ってないけど。
-            frame_command["color-change"] = {}
-            frame_command["color-change"]["range"] = command["color-transition"][
-                "range"
-            ]
-            frame_command["color-change"]["from-color"] = command["color-transition"][
-                "from-color"
-            ]
-            frame_command["color-change"]["to-color"] = [0, 0, 0]
-            for rgb in range(3):  # rgb
-                base_color = command["color-transition"]["from-color"][rgb]
-                target_color = command["color-transition"]["to-color"][rgb]
-                color_coef = (target_color - base_color) / (end_frame - start_frame)
-                to_color = color_coef * (frame - start_frame) + base_color
-                frame_command["color-change"]["to-color"][rgb] = to_color
-
-        if "fadeout" in command:
-            frame_command["alpha-blend"] = {}
-            frame_command["alpha-blend"]["to-color"] = command["fadeout"]
-            alpha_coef = -1 / (end_frame - start_frame)
-            elapsed_frame = frame - start_frame
-            frame_command["alpha-blend"]["alpha"] = 1 + alpha_coef * elapsed_frame
-
-        if "background-image" in command:
-            frame_command["background_image"] = command["background-image"]
-
-        if "no-header" in command:
-            frame_command["no_header"] = True
-
+        frame_commands[frame] |= parse_command(command)
 
 bgra = (255, 255, 255, 0)
 with tempfile.TemporaryDirectory() as tmp_dir:
@@ -199,14 +209,11 @@ with tempfile.TemporaryDirectory() as tmp_dir:
 
     is_first = True
     for command in tqdm(frame_commands):
-
         if "background_image" in command:
             frame = np.copy(load_image(command["background_image"]))
-        elif setting.background_image is not None:
-            frame = np.copy(setting.background_image)
         else:
             # 真っ白で初期化
-            frame = np.ones((1080, 1920, 3), dtype="uint8") * 255
+            frame = np.ones((setting.height, setting.width, 3), dtype="uint8") * 255
 
         # サムネ用画像
         if is_first:
