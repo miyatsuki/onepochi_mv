@@ -5,7 +5,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
-from typing import Dict, NamedTuple, Optional, Tuple
+from typing import Any, Dict, NamedTuple, Optional, Tuple
 
 import audioread
 import cv2
@@ -197,6 +197,7 @@ for command in commands:
         frame_commands[frame] |= parse_command(command)
 
 bgra = (255, 255, 255, 0)
+image_cache: Dict[str, Any] = {}
 with tempfile.TemporaryDirectory() as tmp_dir:
     tmp_dir_path = pathlib.Path(tmp_dir)
     tempfile = tmp_dir_path / "tmp.mp4"
@@ -210,7 +211,13 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     is_first = True
     for command in tqdm(frame_commands):
         if "background_image" in command:
-            frame = np.copy(load_image(command["background_image"]))
+            image_file_name = command["background_image"]
+            if image_file_name not in image_cache:
+                image_cache[image_file_name] = np.copy(
+                    load_image(command["background_image"])
+                )
+
+            frame = np.copy(image_cache[image_file_name])
         else:
             # 真っ白で初期化
             frame = np.ones((setting.height, setting.width, 3), dtype="uint8") * 255
