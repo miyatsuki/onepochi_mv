@@ -12,7 +12,7 @@ import cv2
 import ffmpeg
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 title_dir = pathlib.Path(sys.argv[1])
 src_dir = pathlib.Path(__file__).parent.resolve()
@@ -139,7 +139,7 @@ def draw_text(
 image_cache: Dict[str, Any] = {}
 
 
-def parse_command(command: Dict) -> Dict:
+def parse_command(command: Dict, elpased_sec: float) -> Dict:
     ans = {}
     if "text" in command:
         ans["text"] = command["text"]
@@ -174,6 +174,20 @@ def parse_command(command: Dict) -> Dict:
 
         ans["background_image"] = command["background-image"]
 
+    if "background-movie" in command:
+        cap_file = cv2.VideoCapture(str(resolve_path(command["background-movie"])))
+        fps = cap_file.get(cv2.CAP_PROP_FPS)
+        frame_num = int(fps * elpased_sec)
+
+        image_file_name = command["background-movie"] + "." + str(frame_num)
+        if image_file_name not in image_cache:
+            cap_file.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+            _, frame = cap_file.read()
+            image_cache[image_file_name] = np.copy(frame)
+
+        ans["background_image"] = image_file_name
+        cap_file.release()
+
     if "no-header" in command:
         ans["no_header"] = True
 
@@ -188,11 +202,11 @@ with open(command_file) as f:
 
 # deepcopyしておかないとリスト内のdictが全部同じIDになって死ぬ
 frame_commands = [
-    copy.deepcopy(parse_command(setting.default_command))
-    for _ in range(setting.frame_num)
+    copy.deepcopy(parse_command(setting.default_command, frame / setting.fps))
+    for frame in trange(setting.frame_num)
 ]
 
-for command in commands:
+for command in tqdm(commands):
     start_sec = (command["time"][0] - setting.sec_offset) * setting.sec_base
     if command["time"][1] != "end":
         end_sec = (command["time"][1] - setting.sec_offset) * setting.sec_base
@@ -202,8 +216,8 @@ for command in commands:
     start_frame = int(start_sec * setting.fps)
     end_frame = int(end_sec * setting.fps)
 
-    for frame in range(start_frame, end_frame):
-        frame_commands[frame] |= parse_command(command)
+    for frame in trange(start_frame, end_frame):
+        frame_commands[frame] |= parse_command(command, frame / setting.fps - start_sec)
 
 bgra = (255, 255, 255, 0)
 with tempfile.TemporaryDirectory() as tmp_dir:
