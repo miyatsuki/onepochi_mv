@@ -21,10 +21,18 @@ command_file = materials_dir / "commands.json"
 setting_file = materials_dir / "settings.json"
 
 
-# class Header(NamedTuple):
-#    text: str
-#    font: ImageFont.ImageFont
-#    position: Tuple[int, int]
+class Text(NamedTuple):
+    text: str
+    font: ImageFont.ImageFont
+    position: Tuple[int, int]
+    bgra: Tuple[int, int, int, int]
+
+    def draw(self, frame: np.array) -> np.array:
+        img_pil = Image.fromarray(frame)
+        draw = ImageDraw.Draw(img_pil)
+        draw.text(self.position, self.text, font=self.font, fill=bgra)
+        frame = np.array(img_pil)
+        return frame
 
 
 class Setting(NamedTuple):
@@ -96,20 +104,6 @@ def load_setting(setting_file: str) -> Setting:
         sec_base=sec_base,
         sec_offset=sec_offset,
     )
-
-
-def draw_text(
-    frame: np.array,
-    position: Tuple[int, int],
-    text: str,
-    font: ImageFont.ImageFont,
-    bgra: Tuple[int, int, int, int],
-) -> np.array:
-    img_pil = Image.fromarray(frame)
-    draw = ImageDraw.Draw(img_pil)
-    draw.text(position, text, font=font, fill=bgra)
-    frame = np.array(img_pil)
-    return frame
 
 
 image_cache: Dict[str, Any] = {}
@@ -221,13 +215,13 @@ with tempfile.TemporaryDirectory() as tmp_dir:
         if "text" in command:
             x = int(command["text"]["position"][0] * setting.width)
             y = int(command["text"]["position"][1] * setting.height)
-            frame = draw_text(
-                frame=frame,
-                position=(x, y),
+            text = Text(
                 text=command["text"]["text"],
                 font=command["text"]["font"],
+                position=(x, y),
                 bgra=bgra,
             )
+            text.draw()
 
         if "color-change" in command:
             lu = command["color-change"]["range"][0]  # 左上
