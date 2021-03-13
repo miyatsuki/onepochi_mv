@@ -21,14 +21,13 @@ command_file = materials_dir / "commands.json"
 setting_file = materials_dir / "settings.json"
 
 
-class Header(NamedTuple):
-    text: str
-    font: ImageFont.ImageFont
-    position: Tuple[int, int]
+# class Header(NamedTuple):
+#    text: str
+#    font: ImageFont.ImageFont
+#    position: Tuple[int, int]
 
 
 class Setting(NamedTuple):
-    header: Optional[Header]
     fps: int
     frame_num: int
     duration: float
@@ -75,15 +74,6 @@ def load_setting(setting_file: str) -> Setting:
     width = setting["width"]
     height = setting["height"]
 
-    # header_setting
-    header = None
-    if "header" in setting:
-        setting["header_font"] = resolve_path(setting["header_font"])
-        fontpath = str(setting["header_font"])
-        header_font = ImageFont.truetype(fontpath, 48)
-        header_position = (30, 30)
-        header = Header(setting["header"], header_font, header_position)
-
     if "sec_base" in setting:
         sec_base = setting["sec_base"]
     else:
@@ -95,7 +85,6 @@ def load_setting(setting_file: str) -> Setting:
         sec_offset = 0
 
     return Setting(
-        header=header,
         fps=fps,
         frame_num=frame_num,
         duration=duration,
@@ -181,9 +170,6 @@ def parse_command(command: Dict, elpased_sec: float) -> Dict:
 
         ans["background_image"] = image_file_name
 
-    if "no-header" in command:
-        ans["no_header"] = True
-
     return ans
 
 
@@ -242,25 +228,6 @@ with tempfile.TemporaryDirectory() as tmp_dir:
                 font=command["text"]["font"],
                 bgra=bgra,
             )
-
-        # ヘッダー
-        if setting.header is not None:
-            if "no_header" not in command or not command["no_header"]:
-                cv2.rectangle(
-                    frame,
-                    (0, 0),
-                    (setting.width, int(setting.height * 0.075) + 10),
-                    (0, 0, 0),
-                    thickness=-1,
-                )
-
-                frame = draw_text(
-                    frame=frame,
-                    position=setting.header.position,
-                    text=setting.header.text,
-                    font=setting.header.font,
-                    bgra=bgra,
-                )
 
         if "color-change" in command:
             lu = command["color-change"]["range"][0]  # 左上
