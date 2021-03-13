@@ -137,6 +137,7 @@ def draw_text(
 
 
 image_cache: Dict[str, Any] = {}
+movie_cache = {}
 
 
 def parse_command(command: Dict, elpased_sec: float) -> Dict:
@@ -175,7 +176,13 @@ def parse_command(command: Dict, elpased_sec: float) -> Dict:
         ans["background_image"] = command["background-image"]
 
     if "background-movie" in command:
-        cap_file = cv2.VideoCapture(str(resolve_path(command["background-movie"])))
+        movie_file_name = command["background-movie"]
+        if command["background-movie"] not in movie_cache:
+            movie_cache[movie_file_name] = cv2.VideoCapture(
+                str(resolve_path(movie_file_name))
+            )
+
+        cap_file = movie_cache[movie_file_name]
         fps = cap_file.get(cv2.CAP_PROP_FPS)
         frame_num = int(fps * elpased_sec)
 
@@ -183,10 +190,9 @@ def parse_command(command: Dict, elpased_sec: float) -> Dict:
         if image_file_name not in image_cache:
             cap_file.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
             _, frame = cap_file.read()
-            image_cache[image_file_name] = np.copy(frame)
+            image_cache[image_file_name] = frame
 
         ans["background_image"] = image_file_name
-        cap_file.release()
 
     if "no-header" in command:
         ans["no_header"] = True
