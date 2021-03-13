@@ -246,9 +246,9 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             frame = np.ones((setting.height, setting.width, 3), dtype="uint8") * 255
 
         # サムネ用画像
-        if is_first:
-            cv2.imwrite(str(tmp_dir_path / "Thumbnail.jpg"), frame)
-            is_first = False
+        # if is_first:
+        #    cv2.imwrite(str(tmp_dir_path / "Thumbnail.jpg"), frame)
+        #    is_first = False
 
         # cv2.rectangle(
         #    frame,
