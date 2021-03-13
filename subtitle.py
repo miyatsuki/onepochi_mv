@@ -250,13 +250,13 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             cv2.imwrite(str(tmp_dir_path / "Thumbnail.jpg"), frame)
             is_first = False
 
-        cv2.rectangle(
-            frame,
-            (0, int(setting.height * 0.9) - 10),
-            (setting.width, setting.height),
-            (0, 0, 0),
-            thickness=-1,
-        )
+        # cv2.rectangle(
+        #    frame,
+        #    (0, int(setting.height * 0.9) - 10),
+        #    (setting.width, setting.height),
+        #    (0, 0, 0),
+        #    thickness=-1,
+        # )
 
         if "text" in command:
             x = int(command["text"]["position"][0] * setting.width)
