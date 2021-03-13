@@ -258,14 +258,16 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             thickness=-1,
         )
 
-        text = command["text"] if "text" in command else ""
-        frame = draw_text(
-            frame=frame,
-            position=setting.subtitle.position,
-            text=text,
-            font=setting.subtitle.font,
-            bgra=bgra,
-        )
+        if "text" in command:
+            x = int(command["text"]["position"][0] * setting.width)
+            y = int(command["text"]["position"][1] * setting.height)
+            frame = draw_text(
+                frame=frame,
+                position=(x, y),
+                text=command["text"]["text"],
+                font=setting.subtitle.font,
+                bgra=bgra,
+            )
 
         # ヘッダー
         if setting.header is not None:
