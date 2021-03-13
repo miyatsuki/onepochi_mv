@@ -27,14 +27,8 @@ class Header(NamedTuple):
     position: Tuple[int, int]
 
 
-class Subtitle(NamedTuple):
-    font: ImageFont.ImageFont
-    position: Tuple[int, int]
-
-
 class Setting(NamedTuple):
     header: Optional[Header]
-    subtitle: Subtitle
     fps: int
     frame_num: int
     duration: float
@@ -81,12 +75,6 @@ def load_setting(setting_file: str) -> Setting:
     width = setting["width"]
     height = setting["height"]
 
-    # subtitle_setting
-    fontpath = str(setting["font"])
-    font = ImageFont.truetype(fontpath, 60)
-    position = (30, int(height * 0.91))
-    subtitle = Subtitle(font, position)
-
     # header_setting
     header = None
     if "header" in setting:
@@ -108,7 +96,6 @@ def load_setting(setting_file: str) -> Setting:
 
     return Setting(
         header=header,
-        subtitle=subtitle,
         fps=fps,
         frame_num=frame_num,
         duration=duration,
@@ -245,19 +232,6 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             # 真っ白で初期化
             frame = np.ones((setting.height, setting.width, 3), dtype="uint8") * 255
 
-        # サムネ用画像
-        # if is_first:
-        #    cv2.imwrite(str(tmp_dir_path / "Thumbnail.jpg"), frame)
-        #    is_first = False
-
-        # cv2.rectangle(
-        #    frame,
-        #    (0, int(setting.height * 0.9) - 10),
-        #    (setting.width, setting.height),
-        #    (0, 0, 0),
-        #    thickness=-1,
-        # )
-
         if "text" in command:
             x = int(command["text"]["position"][0] * setting.width)
             y = int(command["text"]["position"][1] * setting.height)
@@ -265,7 +239,7 @@ with tempfile.TemporaryDirectory() as tmp_dir:
                 frame=frame,
                 position=(x, y),
                 text=command["text"]["text"],
-                font=setting.subtitle.font,
+                font=command["text"]["font"],
                 bgra=bgra,
             )
 
