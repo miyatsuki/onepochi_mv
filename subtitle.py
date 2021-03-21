@@ -163,6 +163,9 @@ def parse_command(command: Dict, elpased_sec: float) -> Dict:
 
         ans["background_image"] = image_file_name
 
+    if "screenshot" in command:
+        ans["screenshot"] = command["screenshot"]
+
     return ans
 
 
@@ -188,8 +191,18 @@ for command in tqdm(commands):
     start_frame = int(start_sec * setting.fps)
     end_frame = int(end_sec * setting.fps)
 
-    for frame in trange(start_frame, end_frame):
-        frame_commands[frame] |= parse_command(command, frame / setting.fps - start_sec)
+    if start_frame < end_frame:
+        for frame in trange(start_frame, end_frame):
+            frame_commands[frame] |= parse_command(
+                command, frame / setting.fps - start_sec
+            )
+    elif start_frame == end_frame:
+        frame_commands[start_frame] |= parse_command(
+            command, start_frame / setting.fps - start_sec
+        )
+    else:
+        assert start_frame <= end_frame
+
 
 bgra = (255, 255, 255, 0)
 with tempfile.TemporaryDirectory() as tmp_dir:
@@ -239,6 +252,11 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             to_bgr = np.flip(np.array(command["alpha-blend"]["to-color"]))
             frame = frame * alpha + to_bgr * (1 - alpha)
             frame = frame.astype("uint8")
+
+        # サムネ用画像
+        if "screenshot" in command:
+            cv2.imwrite(str(tmp_dir_path / command["screenshot"]), frame)
+            is_first = False
 
         out.write(frame)
 
