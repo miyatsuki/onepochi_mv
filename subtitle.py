@@ -5,7 +5,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, Dict, NamedTuple, Tuple
 
 import audioread
 import cv2
@@ -67,7 +67,6 @@ def load_setting(setting_file: str) -> Setting:
     with open(setting_file) as f:
         setting = json.load(f)
 
-    setting["font"] = resolve_path(setting["font"])
     setting["audio_file"] = resolve_path(setting["audio_file"])
     fps = setting["fps"]
     with audioread.audio_open(str(setting["audio_file"])) as f:
@@ -215,13 +214,15 @@ with tempfile.TemporaryDirectory() as tmp_dir:
         if "text" in command:
             x = int(command["text"]["position"][0] * setting.width)
             y = int(command["text"]["position"][1] * setting.height)
+            font_path = resolve_path(command["text"]["font"])
+            font = ImageFont.truetype(str(font_path), 60)
             text = Text(
                 text=command["text"]["text"],
-                font=command["text"]["font"],
+                font=font,
                 position=(x, y),
                 bgra=bgra,
             )
-            text.draw()
+            frame = text.draw(frame)
 
         if "color-change" in command:
             lu = command["color-change"]["range"][0]  # 左上
