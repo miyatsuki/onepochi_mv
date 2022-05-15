@@ -5,7 +5,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, Dict, Literal, NamedTuple, Optional, Tuple
 
 import audioread
 import cv2
@@ -21,20 +21,29 @@ command_file = materials_dir / "commands.json"
 setting_file = materials_dir / "settings.json"
 
 
-class Header(NamedTuple):
+class Text(NamedTuple):
     text: str
     font: ImageFont.ImageFont
     position: Tuple[int, int]
+    bgra: Tuple[int, int, int, int]
+    stroke_width: Optional[int]
+    stroke_fill: Optional[Tuple[int, int, int, int]]
+    anchor: Literal["left", "center", "right"]
 
-
-class Subtitle(NamedTuple):
-    font: ImageFont.ImageFont
-    position: Tuple[int, int]
-
+    def draw(self, frame: np.array) -> np.array:
+        img_pil = Image.fromarray(frame)
+        draw = ImageDraw.Draw(img_pil)
+        draw.text(self.position, self.text, 
+            font=self.font, fill=self.bgra, 
+            stroke_width=self.stroke_width,
+            stroke_fill=self.stroke_fill,
+            # multiline textではanchorが使えない
+            anchor=self.anchor if "\n" not in self.text else None
+        )
+        frame = np.array(img_pil)
+        return frame
 
 class Setting(NamedTuple):
-    header: Optional[Header]
-    subtitle: Subtitle
     fps: int
     frame_num: int
     duration: float
@@ -58,15 +67,18 @@ def resolve_path(path_string):
 def load_image(path_string: str) -> np.array:
     assert resolve_path(path_string).exists(), f"{path_string}は存在しません"
     path = str(resolve_path(path_string))
-    image = cv2.imread(path)
+    image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+
+    if image.ndim == 3:  # RGBならアルファチャンネル追加
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2RGBA)
+
     return image
 
 
-def load_setting(setting_file: str) -> Setting:
+def load_setting(setting_file: pathlib.Path) -> Setting:
     with open(setting_file) as f:
         setting = json.load(f)
 
-    setting["font"] = resolve_path(setting["font"])
     setting["audio_file"] = resolve_path(setting["audio_file"])
     fps = setting["fps"]
     with audioread.audio_open(str(setting["audio_file"])) as f:
@@ -81,23 +93,10 @@ def load_setting(setting_file: str) -> Setting:
     width = setting["width"]
     height = setting["height"]
 
-    # subtitle_setting
-    fontpath = str(setting["font"])
-    font = ImageFont.truetype(fontpath, 60)
-    position = (30, int(height * 0.91))
-    subtitle = Subtitle(font, position)
-
-    # header_setting
-    header = None
-    if "header" in setting:
-        setting["header_font"] = resolve_path(setting["header_font"])
-        fontpath = str(setting["header_font"])
-        header_font = ImageFont.truetype(fontpath, 48)
-        header_position = (30, 30)
-        header = Header(setting["header"], header_font, header_position)
-
     if "sec_base" in setting:
         sec_base = setting["sec_base"]
+    elif "bpm" in setting:
+        sec_base = setting["bpm"]/60
     else:
         sec_base = 1
 
@@ -107,8 +106,6 @@ def load_setting(setting_file: str) -> Setting:
         sec_offset = 0
 
     return Setting(
-        header=header,
-        subtitle=subtitle,
         fps=fps,
         frame_num=frame_num,
         duration=duration,
@@ -122,25 +119,11 @@ def load_setting(setting_file: str) -> Setting:
     )
 
 
-def draw_text(
-    frame: np.array,
-    position: Tuple[int, int],
-    text: str,
-    font: ImageFont.ImageFont,
-    bgra: Tuple[int, int, int, int],
-) -> np.array:
-    img_pil = Image.fromarray(frame)
-    draw = ImageDraw.Draw(img_pil)
-    draw.text(position, text, font=font, fill=bgra)
-    frame = np.array(img_pil)
-    return frame
-
-
 image_cache: Dict[str, Any] = {}
-movie_cache = {}
+movie_cache: Dict[Any, Any] = {}
 
 
-def parse_command(command: Dict, elpased_sec: float) -> Dict:
+def parse_command(command: Dict, elpased_sec: float, elapsed_ratio: float) -> Dict:
     ans = {}
     if "text" in command:
         ans["text"] = command["text"]
@@ -162,9 +145,7 @@ def parse_command(command: Dict, elpased_sec: float) -> Dict:
     if "fadeout" in command:
         ans["alpha-blend"] = {}
         ans["alpha-blend"]["to-color"] = command["fadeout"]
-        alpha_coef = -1 / (end_frame - start_frame)
-        elapsed_frame = frame - start_frame
-        ans["alpha-blend"]["alpha"] = 1 + alpha_coef * elapsed_frame
+        ans["alpha-blend"]["alpha"] = 1 - elapsed_ratio
 
     if "background-image" in command:
         image_file_name = command["background-image"]
@@ -194,8 +175,39 @@ def parse_command(command: Dict, elpased_sec: float) -> Dict:
 
         ans["background_image"] = image_file_name
 
-    if "no-header" in command:
-        ans["no_header"] = True
+    if "screenshot" in command:
+        ans["screenshot"] = command["screenshot"]
+
+    if "image" in command:
+        if command["image"]["path"] not in image_cache:
+            image_cache[command["image"]["path"]] = np.copy(
+                load_image(command["image"]["path"])
+            )
+
+        if "image" not in ans:
+            ans["image"] = []
+
+        ans["image"] += command["image"]
+
+    if "sequence-images" in command:
+        elapsed_ms = elpased_sec * 1000
+        if "image" not in ans:
+            ans["image"] = []
+
+        for sequence_image in command["sequence-images"]:
+            seqs = sorted(int(p.stem) for p in resolve_path(sequence_image["path"]).glob("*.png"))
+            seq = [s for s in seqs if s <= elapsed_ms][-1]
+
+            image_path = sequence_image["path"] + "/" + str(seq) + ".png"
+            if image_path not in image_cache:
+                image_cache[image_path] = np.copy(
+                    load_image(image_path)
+                )
+            ans["image"].append({
+                "path": image_path,
+                "position": sequence_image["position"]
+            })
+
 
     return ans
 
@@ -208,7 +220,11 @@ with open(command_file) as f:
 
 # deepcopyしておかないとリスト内のdictが全部同じIDになって死ぬ
 frame_commands = [
-    copy.deepcopy(parse_command(setting.default_command, frame / setting.fps))
+    copy.deepcopy(
+        parse_command(
+            setting.default_command, frame / setting.fps, frame / setting.frame_num
+        )
+    )
     for frame in trange(setting.frame_num)
 ]
 
@@ -222,22 +238,36 @@ for command in tqdm(commands):
     start_frame = int(start_sec * setting.fps)
     end_frame = int(end_sec * setting.fps)
 
-    for frame in trange(start_frame, end_frame):
-        frame_commands[frame] |= parse_command(command, frame / setting.fps - start_sec)
+    if start_frame < end_frame:
+        for frame in trange(start_frame, end_frame):
+            frame_commands[frame] |= parse_command(
+                command,
+                frame / setting.fps - start_sec,
+                (frame - start_frame) / (end_frame - start_frame),
+            )
+    elif start_frame == end_frame:
+        frame_commands[start_frame] |= parse_command(
+            command, start_frame / setting.fps - start_sec, 0
+        )
+    else:
+        print(command)
+        assert start_frame <= end_frame
+
 
 bgra = (255, 255, 255, 0)
 with tempfile.TemporaryDirectory() as tmp_dir:
     tmp_dir_path = pathlib.Path(tmp_dir)
-    tempfile = tmp_dir_path / "tmp.mp4"
+    temp_file = tmp_dir_path / "tmp.mp4"
     out = cv2.VideoWriter(
-        str(tempfile),
+        str(temp_file),
         fourcc,
         int(setting.fps),
         (int(setting.width), int(setting.height)),
     )
 
-    is_first = True
-    for command in tqdm(frame_commands):
+    for i, command in tqdm(enumerate(frame_commands), total=len(frame_commands)):
+        print("frame", i, command)
+
         if "background_image" in command:
             image_file_name = command["background_image"]
             frame = np.copy(image_cache[image_file_name])
@@ -245,46 +275,34 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             # 真っ白で初期化
             frame = np.ones((setting.height, setting.width, 3), dtype="uint8") * 255
 
-        # サムネ用画像
-        if is_first:
-            cv2.imwrite(str(tmp_dir_path / "Thumbnail.jpg"), frame)
-            is_first = False
+        if "image" in command:
+            for image_command in command["image"]:
+                x = int(image_command["position"][0] * setting.width)
+                y = int(image_command["position"][1] * setting.height)
+                img_frame = Image.fromarray(frame)
+                img_overlay = Image.fromarray(image_cache[image_command["path"]])
 
-        cv2.rectangle(
-            frame,
-            (0, int(setting.height * 0.9) - 10),
-            (setting.width, setting.height),
-            (0, 0, 0),
-            thickness=-1,
-        )
+                # 透明度有りの画像を貼る場合はパラメータを変える
+                # 参考: https://stackoverflow.com/questions/5324647/how-to-merge-a-transparent-png-image-with-another-image-using-pil
+                img_frame.paste(img_overlay, (x, y), img_overlay)
+                
+                frame = np.array(img_frame)
 
-        text = command["text"] if "text" in command else ""
-        frame = draw_text(
-            frame=frame,
-            position=setting.subtitle.position,
-            text=text,
-            font=setting.subtitle.font,
-            bgra=bgra,
-        )
-
-        # ヘッダー
-        if setting.header is not None:
-            if "no_header" not in command or not command["no_header"]:
-                cv2.rectangle(
-                    frame,
-                    (0, 0),
-                    (setting.width, int(setting.height * 0.075) + 10),
-                    (0, 0, 0),
-                    thickness=-1,
-                )
-
-                frame = draw_text(
-                    frame=frame,
-                    position=setting.header.position,
-                    text=setting.header.text,
-                    font=setting.header.font,
-                    bgra=bgra,
-                )
+        if "text" in command:
+            x = int(command["text"]["position"][0] * setting.width)
+            y = int(command["text"]["position"][1] * setting.height)
+            font_path = resolve_path(command["text"]["font"])
+            font = ImageFont.truetype(str(font_path), 60)
+            text = Text(
+                text=command["text"]["text"],
+                font=font,
+                position=(x, y),
+                bgra=tuple(command["text"].get("color", bgra)),
+                stroke_width=command["text"].get("stroke-width", 0),
+                stroke_fill = tuple(command["text"]["stroke-fill"]) if "stroke-fill" in command["text"] else None,
+                anchor=command["text"].get("anchor", "lt")
+            )
+            frame = text.draw(frame)
 
         if "color-change" in command:
             lu = command["color-change"]["range"][0]  # 左上
@@ -296,18 +314,22 @@ with tempfile.TemporaryDirectory() as tmp_dir:
                     if (frame[y, x] == base_rgb).all():  # 指定の色と一致してたら色を差し替える
                         frame[y, x] = to_bgr  # rgbじゃなくてbgrで格納されてるので
         if "alpha-blend" in command:
-            rd = [frame.shape[0], frame.shape[1]]  # 右下(rangeなので-1しなくていい)
             alpha = command["alpha-blend"]["alpha"]
             to_bgr = np.flip(np.array(command["alpha-blend"]["to-color"]))
             frame = frame * alpha + to_bgr * (1 - alpha)
             frame = frame.astype("uint8")
 
+        # サムネ用画像
+        if "screenshot" in command:
+            cv2.imwrite(str(tmp_dir_path / command["screenshot"]), frame)
+
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
         out.write(frame)
 
     out.release()
 
     output_movie_file = str(tmp_dir_path / setting.output_file)
-    movie_input = ffmpeg.input(tempfile)
+    movie_input = ffmpeg.input(temp_file)
     audio_input = ffmpeg.input(setting.audio_file)
     output = ffmpeg.output(movie_input, audio_input, output_movie_file)
     print(ffmpeg.compile(output))
