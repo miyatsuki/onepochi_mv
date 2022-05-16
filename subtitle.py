@@ -1,47 +1,26 @@
-import copy
 import datetime
 import json
-import pathlib
 import shutil
 import sys
 import tempfile
-from typing import Any, Dict, Literal, NamedTuple, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, NamedTuple
 
 import audioread
 import cv2
 import ffmpeg
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
-from tqdm import tqdm, trange
+from PIL import ImageFont
+from tqdm import tqdm
 
-title_dir = pathlib.Path(sys.argv[1])
-src_dir = pathlib.Path(__file__).parent.resolve()
+from commands import Command, ImageCommand, ScreenshotCommand, TextCommand
+
+title_dir = Path(sys.argv[1])
+src_dir = Path(__file__).parent.resolve()
 materials_dir = title_dir / "materials"
 command_file = materials_dir / "commands.json"
 setting_file = materials_dir / "settings.json"
 
-
-class Text(NamedTuple):
-    text: str
-    font: ImageFont.ImageFont
-    position: Tuple[int, int]
-    bgra: Tuple[int, int, int, int]
-    stroke_width: Optional[int]
-    stroke_fill: Optional[Tuple[int, int, int, int]]
-    anchor: Literal["left", "center", "right"]
-
-    def draw(self, frame: np.array) -> np.array:
-        img_pil = Image.fromarray(frame)
-        draw = ImageDraw.Draw(img_pil)
-        draw.text(self.position, self.text, 
-            font=self.font, fill=self.bgra, 
-            stroke_width=self.stroke_width,
-            stroke_fill=self.stroke_fill,
-            # multiline textではanchorが使えない
-            anchor=self.anchor if "\n" not in self.text else None
-        )
-        frame = np.array(img_pil)
-        return frame
 
 class Setting(NamedTuple):
     fps: int
@@ -50,21 +29,22 @@ class Setting(NamedTuple):
     default_command: Dict
     width: int
     height: int
-    output_file: pathlib.Path
-    audio_file: pathlib.Path
+    output_file: Path
+    audio_file: Path
     sec_base: float
     sec_offset: int
+    presets: Dict[str, Dict[str, Any]]
 
 
 def resolve_path(path_string):
-    p = pathlib.Path(path_string)
+    p = Path(path_string)
     if p.is_absolute():
         return p.resolve()
     else:
         return materials_dir / p
 
 
-def load_image(path_string: str) -> np.array:
+def load_image(path_string: str) -> cv2.Mat:
     assert resolve_path(path_string).exists(), f"{path_string}は存在しません"
     path = str(resolve_path(path_string))
     image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
@@ -75,7 +55,7 @@ def load_image(path_string: str) -> np.array:
     return image
 
 
-def load_setting(setting_file: pathlib.Path) -> Setting:
+def load_setting(setting_file: Path) -> Setting:
     with open(setting_file) as f:
         setting = json.load(f)
 
@@ -96,7 +76,7 @@ def load_setting(setting_file: pathlib.Path) -> Setting:
     if "sec_base" in setting:
         sec_base = setting["sec_base"]
     elif "bpm" in setting:
-        sec_base = setting["bpm"]/60
+        sec_base = setting["bpm"] / 60
     else:
         sec_base = 1
 
@@ -116,18 +96,71 @@ def load_setting(setting_file: pathlib.Path) -> Setting:
         audio_file=setting["audio_file"],
         sec_base=sec_base,
         sec_offset=sec_offset,
+        presets=setting.get("presets", {}),
     )
 
 
-image_cache: Dict[str, Any] = {}
+image_cache: Dict[Path, np.ndarray] = {}
 movie_cache: Dict[Any, Any] = {}
 
 
-def parse_command(command: Dict, elpased_sec: float, elapsed_ratio: float) -> Dict:
-    ans = {}
-    if "text" in command:
-        ans["text"] = command["text"]
+def parse_command(
+    base_command: Dict[str, Any], elpased_sec: float, elapsed_ratio: float
+) -> Command:
 
+    command: Dict[str, Any] = {}
+    for preset_name in base_command.get("presets", []):
+        command |= setting.presets[preset_name]
+
+    command |= base_command
+
+    match command:
+        case {"type": "image"}:
+            image_path = resolve_path(command["path"])
+
+            if image_path not in image_cache:
+                image_cache[image_path] = np.copy(load_image(image_path))
+
+            params = command.copy()
+            params["path"] = image_path
+            return ImageCommand(**params)
+        case {"type": "sequence-image"}:
+            image_dir = resolve_path(command["path"])
+            elapsed_ms = elpased_sec * 1000
+
+            seqs = sorted(int(p.stem) for p in image_dir.glob("*.png"))
+            seq = [s for s in seqs if s <= elapsed_ms][-1]
+
+            image_path = image_dir / (str(seq) + ".png")
+            if image_path not in image_cache:
+                image_cache[image_path] = np.copy(load_image(image_path))
+
+            params = command.copy()
+            params["path"] = image_path
+            return ImageCommand(**params)
+        case {"type": "text"}:
+            return TextCommand(
+                type="text",
+                time=command["time"],
+                position=command["position"],
+                text=command["text"],
+                font=ImageFont.truetype(str(resolve_path(command["font"])), 60),
+                bgra=command.get("color", [255, 255, 255, 255]),
+                stroke_width=command.get("stroke-width", 0),
+                stroke_fill=command.get("stroke-fill", None),
+                anchor=command.get("anchor", None),
+            )
+        case {"type": "screenshot"}:
+            return ScreenshotCommand(
+                type="screenshot",
+                time=command["time"],
+                path_str=command["path"],
+                position=(0.0, 0.0),  # 使わないので適当に入れとく
+            )
+        case _:
+            raise ValueError(command)
+
+    """
     if "color-transition" in command:
         # 連続変化はフレーム単位では単純な差し替えなので差し替えっぽい命令に書き換える
         # color-changeコマンドは今のところ使ってないけど。
@@ -147,15 +180,6 @@ def parse_command(command: Dict, elpased_sec: float, elapsed_ratio: float) -> Di
         ans["alpha-blend"]["to-color"] = command["fadeout"]
         ans["alpha-blend"]["alpha"] = 1 - elapsed_ratio
 
-    if "background-image" in command:
-        image_file_name = command["background-image"]
-        if image_file_name not in image_cache:
-            image_cache[image_file_name] = np.copy(
-                load_image(command["background-image"])
-            )
-
-        ans["background_image"] = command["background-image"]
-
     if "background-movie" in command:
         movie_file_name = command["background-movie"]
         if command["background-movie"] not in movie_cache:
@@ -174,42 +198,7 @@ def parse_command(command: Dict, elpased_sec: float, elapsed_ratio: float) -> Di
             image_cache[image_file_name] = frame
 
         ans["background_image"] = image_file_name
-
-    if "screenshot" in command:
-        ans["screenshot"] = command["screenshot"]
-
-    if "image" in command:
-        if command["image"]["path"] not in image_cache:
-            image_cache[command["image"]["path"]] = np.copy(
-                load_image(command["image"]["path"])
-            )
-
-        if "image" not in ans:
-            ans["image"] = []
-
-        ans["image"] += command["image"]
-
-    if "sequence-images" in command:
-        elapsed_ms = elpased_sec * 1000
-        if "image" not in ans:
-            ans["image"] = []
-
-        for sequence_image in command["sequence-images"]:
-            seqs = sorted(int(p.stem) for p in resolve_path(sequence_image["path"]).glob("*.png"))
-            seq = [s for s in seqs if s <= elapsed_ms][-1]
-
-            image_path = sequence_image["path"] + "/" + str(seq) + ".png"
-            if image_path not in image_cache:
-                image_cache[image_path] = np.copy(
-                    load_image(image_path)
-                )
-            ans["image"].append({
-                "path": image_path,
-                "position": sequence_image["position"]
-            })
-
-
-    return ans
+    """
 
 
 setting = load_setting(setting_file)
@@ -219,35 +208,42 @@ with open(command_file) as f:
     commands = json.load(f)
 
 # deepcopyしておかないとリスト内のdictが全部同じIDになって死ぬ
-frame_commands = [
-    copy.deepcopy(
-        parse_command(
-            setting.default_command, frame / setting.fps, frame / setting.frame_num
-        )
-    )
-    for frame in trange(setting.frame_num)
-]
+# frame_commands = [parse_command() for command in setting.default_command for frame in trange(setting.frame_num)]
+# for frame in trange(setting.frame_num):
+#    frame_commands += copy.deepcopy(
+#        parse_command(
+#            setting.default_command, frame / setting.fps, frame / setting.frame_num
+#        )
+#    )
+frame_commands: List[List[Command]] = [[] for _ in range(setting.frame_num)]
 
 for command in tqdm(commands):
-    start_sec = (command["time"][0] - setting.sec_offset) * setting.sec_base
-    if command["time"][1] != "end":
-        end_sec = (command["time"][1] - setting.sec_offset) * setting.sec_base
-    else:
-        end_sec = setting.duration
+    start_sec: float = (
+        0
+        if command["time"][0] == "start"
+        else (command["time"][0] - setting.sec_offset) * setting.sec_base
+    )
+    end_sec: float = (
+        setting.duration
+        if command["time"][1] == "end"
+        else (command["time"][1] - setting.sec_offset) * setting.sec_base
+    )
 
     start_frame = int(start_sec * setting.fps)
     end_frame = int(end_sec * setting.fps)
 
     if start_frame < end_frame:
-        for frame in trange(start_frame, end_frame):
-            frame_commands[frame] |= parse_command(
-                command,
-                frame / setting.fps - start_sec,
-                (frame - start_frame) / (end_frame - start_frame),
+        for frame in range(start_frame, end_frame):
+            frame_commands[frame].append(
+                parse_command(
+                    command,
+                    frame / setting.fps - start_sec,
+                    (frame - start_frame) / (end_frame - start_frame),
+                )
             )
     elif start_frame == end_frame:
-        frame_commands[start_frame] |= parse_command(
-            command, start_frame / setting.fps - start_sec, 0
+        frame_commands[start_frame].append(
+            parse_command(command, start_frame / setting.fps - start_sec, 0)
         )
     else:
         print(command)
@@ -256,7 +252,7 @@ for command in tqdm(commands):
 
 bgra = (255, 255, 255, 0)
 with tempfile.TemporaryDirectory() as tmp_dir:
-    tmp_dir_path = pathlib.Path(tmp_dir)
+    tmp_dir_path = Path(tmp_dir)
     temp_file = tmp_dir_path / "tmp.mp4"
     out = cv2.VideoWriter(
         str(temp_file),
@@ -265,45 +261,26 @@ with tempfile.TemporaryDirectory() as tmp_dir:
         (int(setting.width), int(setting.height)),
     )
 
-    for i, command in tqdm(enumerate(frame_commands), total=len(frame_commands)):
-        print("frame", i, command)
+    for i, frame_command in tqdm(enumerate(frame_commands), total=len(frame_commands)):
+        print("frame", i, frame_command)
 
-        if "background_image" in command:
-            image_file_name = command["background_image"]
-            frame = np.copy(image_cache[image_file_name])
-        else:
-            # 真っ白で初期化
-            frame = np.ones((setting.height, setting.width, 3), dtype="uint8") * 255
+        # 真っ白で初期化
+        frame = np.ones((setting.height, setting.width, 3), dtype="uint8") * 255
 
-        if "image" in command:
-            for image_command in command["image"]:
-                x = int(image_command["position"][0] * setting.width)
-                y = int(image_command["position"][1] * setting.height)
-                img_frame = Image.fromarray(frame)
-                img_overlay = Image.fromarray(image_cache[image_command["path"]])
+        for command in frame_command:
+            match command:
+                case ImageCommand():
+                    frame = command.draw(
+                        frame, setting.width, setting.height, image_cache
+                    )
+                case TextCommand():
+                    frame = command.draw(frame, setting.width, setting.height)
+                case ScreenshotCommand():
+                    command.action(frame, tmp_dir_path)
+                case _:
+                    raise ValueError(command)
 
-                # 透明度有りの画像を貼る場合はパラメータを変える
-                # 参考: https://stackoverflow.com/questions/5324647/how-to-merge-a-transparent-png-image-with-another-image-using-pil
-                img_frame.paste(img_overlay, (x, y), img_overlay)
-                
-                frame = np.array(img_frame)
-
-        if "text" in command:
-            x = int(command["text"]["position"][0] * setting.width)
-            y = int(command["text"]["position"][1] * setting.height)
-            font_path = resolve_path(command["text"]["font"])
-            font = ImageFont.truetype(str(font_path), 60)
-            text = Text(
-                text=command["text"]["text"],
-                font=font,
-                position=(x, y),
-                bgra=tuple(command["text"].get("color", bgra)),
-                stroke_width=command["text"].get("stroke-width", 0),
-                stroke_fill = tuple(command["text"]["stroke-fill"]) if "stroke-fill" in command["text"] else None,
-                anchor=command["text"].get("anchor", "lt")
-            )
-            frame = text.draw(frame)
-
+        """
         if "color-change" in command:
             lu = command["color-change"]["range"][0]  # 左上
             rd = command["color-change"]["range"][1]  # 右下
@@ -318,10 +295,7 @@ with tempfile.TemporaryDirectory() as tmp_dir:
             to_bgr = np.flip(np.array(command["alpha-blend"]["to-color"]))
             frame = frame * alpha + to_bgr * (1 - alpha)
             frame = frame.astype("uint8")
-
-        # サムネ用画像
-        if "screenshot" in command:
-            cv2.imwrite(str(tmp_dir_path / command["screenshot"]), frame)
+        """
 
         frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
         out.write(frame)
