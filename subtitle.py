@@ -139,12 +139,13 @@ def parse_command(
             params["path"] = image_path
             return ImageCommand(**params)
         case {"type": "text"}:
+            font_size = command.get("font-size", 60)
             return TextCommand(
                 type="text",
                 time=command["time"],
                 position=command["position"],
                 text=command["text"],
-                font=ImageFont.truetype(str(resolve_path(command["font"])), 60),
+                font=ImageFont.truetype(str(resolve_path(command["font"])), font_size),
                 bgra=command.get("color", [255, 255, 255, 255]),
                 stroke_width=command.get("stroke-width", 0),
                 stroke_fill=command.get("stroke-fill", None),
