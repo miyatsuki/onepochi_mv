@@ -49,6 +49,10 @@ class TextCommand(Command):
         x = int(self.position[0] * width)
         y = int(self.position[1] * height)
 
+        # PILのdraw.text関数はマルチラインテキスト（改行を含むテキスト）に対してanchorパラメータを
+        # サポートしていないため、手動で位置調整を行う必要がある。これにより、単一行のテキストと
+        # 複数行のテキストで一貫した位置決め動作を確保できる。
+        #
         # Handle anchor positioning for all text types
         # Calculate position adjustments based on anchor
         if self.anchor:
