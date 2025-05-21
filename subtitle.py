@@ -64,6 +64,7 @@ def load_setting(setting_file: Path) -> Setting:
     with audioread.audio_open(str(setting["audio_file"])) as f:
         duration = f.duration
 
+    print("duration", duration)
     frame_num = int(fps * duration)
 
     default_command = {}
@@ -76,7 +77,8 @@ def load_setting(setting_file: Path) -> Setting:
     if "sec_base" in setting:
         sec_base = setting["sec_base"]
     elif "bpm" in setting:
-        sec_base = setting["bpm"] / 60
+        # TODO: 4/4を仮定
+        sec_base = 60 / setting["bpm"] * 4
     else:
         sec_base = 1
 
@@ -269,7 +271,7 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     )
 
     for i, frame_command in tqdm(enumerate(frame_commands), total=len(frame_commands)):
-        print("frame", i, frame_command)
+        # print("frame", i, frame_command)
 
         # 真っ白で初期化
         frame = np.ones((setting.height, setting.width, 3), dtype="uint8") * 255
