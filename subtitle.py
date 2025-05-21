@@ -64,7 +64,6 @@ def load_setting(setting_file: Path) -> Setting:
     with audioread.audio_open(str(setting["audio_file"])) as f:
         duration = f.duration
 
-    print("duration", duration)
     frame_num = int(fps * duration)
 
     default_command = {}
