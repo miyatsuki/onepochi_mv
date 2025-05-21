@@ -49,41 +49,35 @@ class TextCommand(Command):
         x = int(self.position[0] * width)
         y = int(self.position[1] * height)
 
-        # Handle anchor positioning for multiline text
-        # PIL doesn't support the anchor parameter for multiline text,
-        # so we need to manually calculate the position adjustments
-        if "\n" in self.text and self.anchor:
-            lines = self.text.split("\n")
-            # Calculate width of each line
-            line_widths = [self.font.getbbox(line)[2] - self.font.getbbox(line)[0] for line in lines]
-            max_width = max(line_widths)
+        # Handle anchor positioning for all text types
+        # Calculate position adjustments based on anchor
+        if self.anchor:
+            # For multiline text, we need to split and find max width
+            if "\n" in self.text:
+                lines = self.text.split("\n")
+                line_widths = [self.font.getbbox(line)[2] - self.font.getbbox(line)[0] for line in lines]
+                text_width = max(line_widths)
+            else:
+                # For single line, calculate width directly
+                text_width = self.font.getbbox(self.text)[2] - self.font.getbbox(self.text)[0]
             
             # Adjust x position based on anchor
             if "m" in self.anchor:  # middle horizontally
-                x = x - max_width // 2
+                x = x - text_width // 2
             elif "r" in self.anchor:  # right
-                x = x - max_width
+                x = x - text_width
             
-            # For multiline, we keep y as is since it represents the top position
-            draw.text(
-                (x, y),
-                self.text,
-                font=self.font,
-                fill=tuple(self.bgra),
-                stroke_width=self.stroke_width,
-                stroke_fill=tuple(self.stroke_fill) if self.stroke_fill else None,
-            )
-        else:
-            # Single line text or no anchor specified - use PIL's built-in anchor
-            draw.text(
-                (x, y),
-                self.text,
-                font=self.font,
-                fill=tuple(self.bgra),
-                stroke_width=self.stroke_width,
-                stroke_fill=tuple(self.stroke_fill) if self.stroke_fill else None,
-                anchor=self.anchor,
-            )
+            # We could also handle vertical anchoring here if needed
+        
+        # Draw the text at the calculated position
+        draw.text(
+            (x, y),
+            self.text,
+            font=self.font,
+            fill=tuple(self.bgra),
+            stroke_width=self.stroke_width,
+            stroke_fill=tuple(self.stroke_fill) if self.stroke_fill else None,
+        )
         frame = np.array(img_pil)
         return frame
 
