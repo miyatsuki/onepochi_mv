@@ -76,7 +76,8 @@ def load_setting(setting_file: Path) -> Setting:
     if "sec_base" in setting:
         sec_base = setting["sec_base"]
     elif "bpm" in setting:
-        sec_base = setting["bpm"] / 60
+        # TODO: 4/4を仮定
+        sec_base = 60 / setting["bpm"] * 4
     else:
         sec_base = 1
 
@@ -114,52 +115,58 @@ def parse_command(
 
     command |= base_command
 
-    match command:
-        case {"type": "image"}:
-            image_path = resolve_path(command["path"])
+    # match command:
+    if command["type"] == "image":
+        # case {"type": "image"}:
+        image_path = resolve_path(command["path"])
 
-            if image_path not in image_cache:
-                image_cache[image_path] = np.copy(load_image(image_path))
+        if image_path not in image_cache:
+            image_cache[image_path] = np.copy(load_image(image_path))
 
-            params = command.copy()
-            params["path"] = image_path
-            return ImageCommand(**params)
-        case {"type": "sequence-image"}:
-            image_dir = resolve_path(command["path"])
-            elapsed_ms = elpased_sec * 1000
+        params = command.copy()
+        params["path"] = image_path
+        return ImageCommand(**params)
+    elif command["type"] == "sequence-image":
+        # case {"type": "sequence-image"}:
+        image_dir = resolve_path(command["path"])
+        elapsed_ms = elpased_sec * 1000
 
-            seqs = sorted(int(p.stem) for p in image_dir.glob("*.png"))
-            seq = [s for s in seqs if s <= elapsed_ms][-1]
+        seqs = sorted(int(p.stem) for p in image_dir.glob("*.png"))
+        seq = [s for s in seqs if s <= elapsed_ms][-1]
 
-            image_path = image_dir / (str(seq) + ".png")
-            if image_path not in image_cache:
-                image_cache[image_path] = np.copy(load_image(image_path))
+        image_path = image_dir / (str(seq) + ".png")
+        if image_path not in image_cache:
+            image_cache[image_path] = np.copy(load_image(image_path))
 
-            params = command.copy()
-            params["path"] = image_path
-            return ImageCommand(**params)
-        case {"type": "text"}:
-            font_size = command.get("font-size", 60)
-            return TextCommand(
-                type="text",
-                time=command["time"],
-                position=command["position"],
-                text=command["text"],
-                font=ImageFont.truetype(str(resolve_path(command["font"])), font_size),
-                bgra=command.get("color", [255, 255, 255, 255]),
-                stroke_width=command.get("stroke-width", 0),
-                stroke_fill=command.get("stroke-fill", None),
-                anchor=command.get("anchor", None),
-            )
-        case {"type": "screenshot"}:
-            return ScreenshotCommand(
-                type="screenshot",
-                time=command["time"],
-                path_str=command["path"],
-                position=(0.0, 0.0),  # 使わないので適当に入れとく
-            )
-        case _:
-            raise ValueError(command)
+        params = command.copy()
+        params["path"] = image_path
+        params["type"] = "image"
+        return ImageCommand(**params)
+    elif command["type"] == "text":
+        # case {"type": "text"}:
+        font_size = command.get("font-size", 60)
+        return TextCommand(
+            type="text",
+            time=command["time"],
+            position=command["position"],
+            text=command["text"],
+            font=ImageFont.truetype(str(resolve_path(command["font"])), font_size),
+            bgra=command.get("color", [255, 255, 255, 255]),
+            stroke_width=command.get("stroke-width", 0),
+            stroke_fill=command.get("stroke-fill", None),
+            anchor=command.get("anchor", None),
+        )
+    elif command["type"] == "screenshot":
+        # case {"type": "screenshot"}:
+        return ScreenshotCommand(
+            type="screenshot",
+            time=command["time"],
+            path_str=command["path"],
+            position=(0.0, 0.0),  # 使わないので適当に入れとく
+        )
+    else:
+        # case _:
+        raise ValueError(command)
 
     """
     if "color-transition" in command:
@@ -263,23 +270,25 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     )
 
     for i, frame_command in tqdm(enumerate(frame_commands), total=len(frame_commands)):
-        print("frame", i, frame_command)
+        # print("frame", i, frame_command)
 
         # 真っ白で初期化
         frame = np.ones((setting.height, setting.width, 3), dtype="uint8") * 255
 
         for command in frame_command:
-            match command:
-                case ImageCommand():
-                    frame = command.draw(
-                        frame, setting.width, setting.height, image_cache
-                    )
-                case TextCommand():
-                    frame = command.draw(frame, setting.width, setting.height)
-                case ScreenshotCommand():
-                    command.action(frame, tmp_dir_path)
-                case _:
-                    raise ValueError(command)
+            # match command:
+            if command.type == "image":
+                # case ImageCommand():
+                frame = command.draw(frame, setting.width, setting.height, image_cache)
+            elif command.type == "text":
+                # case TextCommand():
+                frame = command.draw(frame, setting.width, setting.height)
+            elif command.type == "screenshot":
+                # case ScreenshotCommand():
+                command.action(frame, tmp_dir_path)
+            else:
+                # case _:
+                raise ValueError(command)
 
         """
         if "color-change" in command:
