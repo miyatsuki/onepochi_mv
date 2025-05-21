@@ -49,6 +49,22 @@ class TextCommand(Command):
         x = int(self.position[0] * width)
         y = int(self.position[1] * height)
 
+        if self.anchor:
+            # PILのdraw.text関数は改行を含むテキストに対してanchorパラメータをサポートしていないため、手動で位置調整を行う必要がある
+            lines = self.text.split("\n")
+            bboxes = [self.font.getbbox(line) for line in lines]
+            line_widths = [bbox[2] - bbox[0] for bbox in bboxes]
+            text_width = max(line_widths)
+
+            # Adjust x position based on anchor
+            if "m" in self.anchor:  # middle horizontally
+                x = x - text_width // 2
+            elif "r" in self.anchor:  # right
+                x = x - text_width
+
+            # We could also handle vertical anchoring here if needed
+
+        # Draw the text at the calculated position
         draw.text(
             (x, y),
             self.text,
@@ -56,8 +72,6 @@ class TextCommand(Command):
             fill=tuple(self.bgra),
             stroke_width=self.stroke_width,
             stroke_fill=tuple(self.stroke_fill) if self.stroke_fill else None,
-            # multiline textではanchorが使えない
-            anchor=self.anchor if "\n" not in self.text else None,
         )
         frame = np.array(img_pil)
         return frame
