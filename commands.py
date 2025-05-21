@@ -49,30 +49,21 @@ class TextCommand(Command):
         x = int(self.position[0] * width)
         y = int(self.position[1] * height)
 
-        # PILのdraw.text関数はマルチラインテキスト（改行を含むテキスト）に対してanchorパラメータを
-        # サポートしていないため、手動で位置調整を行う必要がある。これにより、単一行のテキストと
-        # 複数行のテキストで一貫した位置決め動作を確保できる。
-        #
-        # Handle anchor positioning for all text types
-        # Calculate position adjustments based on anchor
         if self.anchor:
-            # For multiline text, we need to split and find max width
-            if "\n" in self.text:
-                lines = self.text.split("\n")
-                line_widths = [self.font.getbbox(line)[2] - self.font.getbbox(line)[0] for line in lines]
-                text_width = max(line_widths)
-            else:
-                # For single line, calculate width directly
-                text_width = self.font.getbbox(self.text)[2] - self.font.getbbox(self.text)[0]
-            
+            # PILのdraw.text関数は改行を含むテキストに対してanchorパラメータをサポートしていないため、手動で位置調整を行う必要がある
+            lines = self.text.split("\n")
+            bboxes = [self.font.getbbox(line) for line in lines]
+            line_widths = [bbox[2] - bbox[0] for bbox in bboxes]
+            text_width = max(line_widths)
+
             # Adjust x position based on anchor
             if "m" in self.anchor:  # middle horizontally
                 x = x - text_width // 2
             elif "r" in self.anchor:  # right
                 x = x - text_width
-            
+
             # We could also handle vertical anchoring here if needed
-        
+
         # Draw the text at the calculated position
         draw.text(
             (x, y),
