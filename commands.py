@@ -49,9 +49,11 @@ class TextCommand(Command):
         x = int(self.position[0] * width)
         y = int(self.position[1] * height)
 
-        if self.anchor and "\n" in self.text:
+        # Always split text into lines (even for single line text)
+        lines = self.text.split("\n")
+        
+        if self.anchor:
             # PILのdraw.text関数は改行を含むテキストに対してanchorパラメータをサポートしていないため、手動で位置調整を行う必要がある
-            lines = self.text.split("\n")
             bboxes = [self.font.getbbox(line) for line in lines]
             line_heights = [bbox[3] - bbox[1] for bbox in bboxes]
             
@@ -60,7 +62,7 @@ class TextCommand(Command):
             
             # Draw each line separately with its own alignment
             current_y = y
-            for i, line in enumerate(lines):
+            for line in lines:
                 current_x = x
                 if not line:  # Skip empty lines but advance y position
                     current_y += int(avg_line_height)
@@ -88,19 +90,7 @@ class TextCommand(Command):
                 # Move to the next line position
                 current_y += int(avg_line_height)
         else:
-            # For single line text or when no anchor is specified, use the original approach
-            if self.anchor:
-                bboxes = [self.font.getbbox(self.text)]
-                line_widths = [bbox[2] - bbox[0] for bbox in bboxes]
-                text_width = max(line_widths)
-
-                # Adjust x position based on anchor
-                if "m" in self.anchor:  # middle horizontally
-                    x = x - text_width // 2
-                elif "r" in self.anchor:  # right
-                    x = x - text_width
-
-            # Draw the text at the calculated position
+            # When no anchor is specified, draw text directly
             draw.text(
                 (x, y),
                 self.text,
